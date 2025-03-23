@@ -1,39 +1,15 @@
-# The code processes the outputs from skyline 
-
+# Library, global functions and parameters  ----
 library(tidyverse)
 library(magrittr)
 library(ggrepel)
-
-
-# global functions and parameters  ----
+library(drc)
+library(scales)
 base <- '/Users/shiyuanguo/Library/CloudStorage/GoogleDrive-sguo039@ucr.edu/My Drive/PhD_study/IGR_RWE/1.IGR37xp_manuscript'
-
 plot_shape = 20; plot_size = 0.5; plot_alpha = 0.4; plot_pos = '#F8766D'# ggploting parameters
 
-mm <- list(  
-  Mean = ~.x/mean(cur_data()[[cur_column()]], na.rm = TRUE), 
-  Median = ~.x/median(cur_data()[[cur_column()]], na.rm = TRUE)
-) 
-rsd = ~sd(c(.x, .y), na.rm = TRUE)/mean(c(.x, .y),na.rm = TRUE) # calculating the RSD
-env <- environment() # assign format to obtain the intermediate dataset. 
-lm_equation <- function(y, x, data, ...){
-  # annotating the equation on ggplot. 
-  formula <- as.formula(paste(y,paste(x, collapse = ' + '),sep = ' ~ '))
-  m <- lm(formula, data, ...) 
-  substituteList <- list(a = format(abs(unname(coef(m)[1])), digits = 3),
-                         b = format(unname(coef(m)[2]), digits = 3),
-                         r2 = format(summary(m)$r.squared, digits = 3))
-  if (coef(m)[1] > 0){
-    eq <- substitute(italic(y) == b %.% italic(x)+a*";"~~italic(r)^2~"="~r2, substituteList)
-  } else {
-    eq <- substitute(italic(y) == b %.% italic(x)-a*";"~~italic(r)^2~"="~r2, substituteList)
-  }
-  as.character(as.expression(eq))
-}
 
-
-
-# obtain the injection info from both replicates ----
+# loading SILAC_peptidesRatio between IGR37xp vs IGR37 ----
+# obtain the injection info from both replicates
 injectionfiles = paste0(file.path(base, 'data', 'injectionLists', '12min_max40txsits'), '_000', 1:5, '.csv')
 injectionList <- lapply(injectionfiles, function(n){
   readr::read_csv(n) %>%
@@ -43,8 +19,6 @@ injectionList <- lapply(injectionfiles, function(n){
     unique(.)
 })
 
-
-# loading SILAC_peptidesRatio between vemurafenib resistance vs sensitive cell ----
 # skyline document grid > SILAC_peptideRatio > export as 'SILAC_peptideRatio.csv'
 ptbl <- read_csv(file.path(base, 'data', 'SILAC_peptideRatio.csv')) %>% 
   filter(Protein != 'sp|P02769|ALBU_BOVIN-standard') %>%
@@ -61,9 +35,9 @@ ptbl <- read_csv(file.path(base, 'data', 'SILAC_peptideRatio.csv')) %>%
          fr = str_extract(Replicate, '[:alpha:]')) %>% 
   filter(repli == prmlist) %>% 
   ungroup() %>%
-  ############
+  ############ end 
   mutate(`Total Area` = as.numeric(`Total Area`))%>% 
-  select(Peptide, `Protein Name`, fr, `Total Area`, `Isotope Label Type`) %>% 
+  dplyr::select(Peptide, `Protein Name`, fr, `Total Area`, `Isotope Label Type`) %>% 
   pivot_wider(names_from = c(fr, `Isotope Label Type`), values_from = `Total Area`)%>%
   mutate(Fwd =   F_heavy / F_light, 
          Rvs =   R_light / R_heavy) %>% 
@@ -75,177 +49,115 @@ ptbl <- read_csv(file.path(base, 'data', 'SILAC_peptideRatio.csv')) %>%
   separate_wider_regex('Protein Name', c(proteinName = ".*?", " |/", ".*")) %>% 
   filter(proteinName != 'METTL9') # METTL9 is not a RWE protein but included in the RWE library because it is in METTL family. 
 
-th <- 2
-gt_tbl <- ptbl %>% 
-  group_by(proteinName) %>% 
-  filter(proteinName %in% proteinName[Fwd > th & Rvs > th])
-lt_tbl <- ptbl %>% 
-  group_by(proteinName) %>% 
-  filter(proteinName %in% proteinName[Fwd < 1/th & Rvs < 1/th]) 
-wb <- openxlsx::createWorkbook(); 
-openxlsx::addWorksheet(wb, 'gt'); openxlsx::writeData(wb, 'gt', gt_tbl); 
-openxlsx::addWorksheet(wb, 'lt'); openxlsx::writeData(wb, 'lt', lt_tbl); 
-openxlsx::openXL(wb)
-# wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptbl); openxlsx::openXL(wb)
-
-# peptide level plot ----
-# TODO change to log scale
-cutoff <- 2
-lab_cutoff <- 2
-ptbl %>% 
-  ggplot(aes(x = Fwd, y = Rvs), shape = plot_shape)+
-  geom_point(color = 'grey', size = plot_size, alpha = plot_alpha)+
-  geom_point(data = . %>% filter((Fwd > cutoff & Rvs > cutoff) | (Fwd < 1/cutoff & Rvs < 1/cutoff)), color = plot_pos, size = plot_size)+
-  ggrepel::geom_text_repel(data = . %>% filter(Fwd > lab_cutoff & Rvs > lab_cutoff), aes(label = proteinName), size= 3, force_pull = 10, force = 1, min.segment.length = 0.1, max.overlaps = Inf)+
-  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0, 4), ylim = c(0, 4), xintercept = 1, yintercept = 1, ratio = 1)+
-  labs(x = "Ratio(Resistant/Sensitive), Forward", y = "Ratio(Resistance/Sensitive), Reverse")+
-  theme_classic()+ # increase x limit
-  theme(legend.position = "none")
-
-
-# protein level (w\o normalization) ----
+# protein level by averaging all the constituting peptides
 prottbl <- ptbl %>%
-  group_by(proteinName) %>%
-  summarise(across(matches('Fwd|Rvs'), ~list(.x))) %>%
+  group_by(proteinName) %>% # using `group_by` followed by `summarise` instead of `nest` to get two list-col for fwd and rvs respectively. 
+  summarise(across(matches('Fwd|Rvs'), ~list(.x))) %>% 
   ungroup() %>%
-  mutate(rsd = map2_dbl(Fwd, Rvs, rsd)) %>% 
   mutate(across(matches('Fwd|Rvs'), ~map_dbl(., ~mean(.x, na.rm = TRUE)))) %>% 
-  # filter(lengths(Fwd_normByMedian) > 1) %>%
-  # mutate(rsd_scaled = ifelse(rsd > 0.5, 1, (rsd-min(rsd, na.rm = TRUE)) / (0.5 - min(rsd, na.rm = TRUE)))) %>%
   rowwise() %>% 
-  mutate(log2fc = log2(mean(Fwd, Rvs, na.rm = TRUE))) %>% 
+  mutate(log2fc = log2(mean(c(Fwd, Rvs), na.rm = TRUE))) %>% 
   arrange(desc(log2fc))
 
-# protein plot 
-lab_pcut <- pcut <- 2
-lab_ncut <- ncut <- 2.5
-gt_protein <- gt_tbl %>% 
-  summarise(ratioByPeptide = base::mean(c(Fwd, Rvs)))
-lt_protein <- lt_tbl %>% 
-  summarise(ratioByPeptide = base::mean(c(Fwd, Rvs)))
-prottbl %>% 
+# shortlist peptides based on mean protein ratios
+th <- 2
+gt_ls <- prottbl %>% filter(Fwd > th & Rvs > th) %>% pull(proteinName)
+gt_tbl <- ptbl %>% 
+  group_by(proteinName) %>% 
+  filter(proteinName %in% gt_ls) %>% 
+  ungroup()
+lt_ls <- prottbl %>% filter(Fwd < 1/th & Rvs < 1/th) %>% pull(proteinName)
+lt_tbl <- ptbl %>% 
+  group_by(proteinName) %>% 
+  filter(proteinName %in% lt_ls) %>% 
+  ungroup()
+
+# output tables
+wb <- openxlsx::createWorkbook(); 
+tn <- 'PRM_RWE_fulllist'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, ptbl);
+tn <- 'gt'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, gt_tbl); 
+tn <- 'lt'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, lt_tbl); 
+openxlsx::openXL(wb)
+
+# protein ratio plot 
+p <- prottbl %>% 
   ggplot(aes(x = Fwd, y = Rvs), shape = plot_shape)+
   geom_point(color = 'grey', size = plot_size, alpha = plot_alpha)+
-  geom_point(data = . %>% filter(proteinName %in% c(gt_protein$proteinName, lt_protein$proteinName)), color = plot_pos, size = plot_size)+
-  ggrepel::geom_text_repel(data = . %>% filter(proteinName %in% c(gt_protein$proteinName, lt_protein$proteinName[rank(lt_protein$ratioByPeptide) < 6])), aes(label = proteinName), size= 3, force_pull = 10, force = 1, min.segment.length = 0.1, max.overlaps = Inf)+
-  scale_x_continuous(trans = scales::log2_trans(), breaks = c(.1, .2, .5,1 ,2,5,10))+
-  scale_y_continuous(trans = scales::log2_trans(),breaks = c(.1, .2, .5 ,2,5,10))+
-  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0.1, 12), ylim = c(0.1, 12), xintercept = 0, yintercept = 0, ratio = 1)+
-  labs(x = "Ratio(Resistant/Sensitive), Forward", y = "Ratio(Resistance/Sensitive), Reverse")+
+  geom_point(data = . %>% filter(proteinName %in% c(gt_ls, lt_ls)), color = plot_pos, size = plot_size)+
+  ggrepel::geom_text_repel(data = . %>% filter(proteinName %in% c(gt_ls, tail(lt_ls, 6))), aes(label = proteinName), size= 3, force_pull = 10, force = 1, min.segment.length = 0.1, max.overlaps = Inf)+
+  scale_x_continuous(trans = scales::log2_trans(), breaks = c(.2, .5,1 ,2,5))+
+  scale_y_continuous(trans = scales::log2_trans(),breaks = c(.2, .5 ,2,5))+
+  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0.2, 5), ylim = c(0.2, 5), xintercept = 0, yintercept = 0, ratio = 1)+
+  labs(x = "Log2(IGR37xp/IGR37), Forward", y = "Log2(IGR37xp/IGR37), Reverse")+
   theme_classic()+ # increase x limit
   theme(legend.position = "none",
         # panel.border = element_rect(colour = "black", fill=NA),
-        legend.background = element_blank(),
-        legend.box.background = element_rect(colour = "black"))
+        legend.box.background = element_rect(colour = "black"),
+        legend.background = element_blank())
+ggsave(filename = file.path(base, 'figures/protein_dotplot.svg'), device = 'svg', plot = p, width = 3.5, height = 3.5, units = 'in')
 
 
-  
-# GSEA
-library(org.Hs.eg.db)
-keytypes(org.Hs.eg.db)
+# TRMU KD: experiments from following dates 1)247030_shTRMU_IGR37xl 2)240806_shTRMU_IGR37xl 3) 241007_TRMUrescue -------
+tbl <- readxl::read_excel(file.path(base, 'supplimentaryTable.xlsx'), sheet = 'S7.survival', range = 'R1C1:R126C9', na = '0') %>%  
+  dplyr::filter(timepoint == 2) %>% 
+  dplyr::select(-timepoint) %>% 
+  pivot_longer(`...6`:`...9`, names_to = 'tr', values_to = 'relative survival') %>%
+  group_by(date) %>% 
+  mutate(`relative survival` = `relative survival` - mean(`relative survival`[nM == 'BLANK'], na.rm = TRUE),
+         `relative survival` = ifelse(`relative survival` < 0, NA, `relative survival`)) %>% # remove incomplete data
+  filter(nM != 'BLANK') %>% 
+  filter(!is.na(`relative survival`)) %>%
+  ungroup() %>% 
+  group_by(plate) %>%
+  mutate(`relative survival` = `relative survival` / mean(`relative survival`[nM == 1], na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(nM = log10(as.numeric(nM))) %>% 
+  mutate(celltype = dplyr::case_when(
+    celltype == 'IGR37xp_shCtrl' ~ 'shCtrl',
+    celltype == 'IGR37xp_shTRMU' ~ 'shTRMU'))
 
-prottbl[prottbl$proteinName == 'HuR', 'proteinName'] <- 'ELAVL1'
+ 
+mc <- drm(`relative survival` ~ nM, subset = celltype == 'shCtrl', data = tbl, fct = LN.4()) 
+mk <- drm(`relative survival` ~ nM, subset = celltype == 'shTRMU', data = tbl, fct = LN.4()) 
+newdata <- expand.grid(nM=c(log10(1000),log10(5000),log10(10000),log10(30000), log10(50000), log10(100000))) # all the confidence interval
+cp <- cbind(newdata, predict(mc, newdata = newdata, interval = 'confidence'), celltype = 'shCtrl');names(cp)[2] <- 'relative survival'
+kp <- cbind(newdata, predict(mk, newdata = newdata, interval = 'confidence'), celltype = 'shTRMU');names(kp)[2] <- 'relative survival'
+ic50_ctrl <- signif(10^(ED(mc, 50, interval = "delta")[1])/1000, digits = 3)
+ic50_kd <- signif(10^(ED(mk, 50, interval = "delta")[1])/1000, digits = 3)
 
-# toEndb <- select(org.Hs.eg.db, keys = prottbl$proteinName, keytype = 'SYMBOL', columns = 'ENSEMBL')
-ctbl <- clusterProfiler::bitr(geneID = prottbl$proteinName, fromType = 'ALIAS', toType = 'ENSEMBL', OrgDb = org.Hs.eg.db, drop = FALSE)
-# s <- clusterProfiler::bitr(geneID = prottbl$proteinName, fromType = 'SYMBOL', toType = 'ENSEMBL', OrgDb = org.Hs.eg.db, drop = FALSE)
-# wb <- openxlsx::createWorkbook();
-# openxlsx::addWorksheet(wb, 'a'); openxlsx::writeData(wb, 'a', a);
-# openxlsx::addWorksheet(wb, 's'); openxlsx::writeData(wb, 's', s);
-# openxlsx::openXL(wb)
-gtbl <- left_join(prottbl, ctbl, by = c('proteinName' = 'ALIAS'))
+global_linewidth <- 0.3
+p <- tbl %>%
+  ggplot(aes(x = nM, y = `relative survival`, color = celltype, shape = celltype))+
+  geom_point(size = 0.1)+
+  geom_smooth(method = drm, method.args = list(fct = LN.4()), se = FALSE, linewidth = global_linewidth)+
+  geom_errorbar(data = cp, aes(ymin=cp[,'Lower'] , ymax=cp[,'Upper'] ), linewidth = global_linewidth, width = 0.05)+
+  geom_errorbar(data = kp, aes(ymin=kp[,'Lower'] , ymax=kp[,'Upper'] ), linewidth = global_linewidth, width = 0.05)+
+  scale_x_continuous(breaks = 0:5, labels = c('1 nM', '10 nM', '100 nM', '1 μM', '10 μM', '100 μM'))+
+  scale_y_continuous(breaks = seq(0, 1, length.out = 5))+
+  theme_classic()+
+  coord_cartesian(ylim = c(0, 1))+
+  xlab('[vem]')+ ylab('relative survival(%)')+
+  # emf cannot take alpha, so i need to change the color to pink and light blue and convert to blue and red in svg. (easier to do for line than points)
+  scale_color_manual(values = c("#cdd6ff", "#ffd6cf"), labels = paste0(c('shCtrl', 'shTRMU'),': ', c(ic50_ctrl, ic50_kd), ' μM'))+
+  # scale_color_manual(values = c("#0433ff", "#ff2600"), labels = paste0(c('shCtrl', 'shTRMU'),': ', c(ic50_ctrl, ic50_kd), ' μM'))+
+  scale_shape_manual(values = c(20, 15), labels = paste0(c('shCtrl', 'shTRMU'),': ', c(ic50_ctrl, ic50_kd), ' μM'), )+
+  geom_hline(yintercept=0.5,linetype = "dashed", colour= "grey", linewidth = global_linewidth)+
+  guides(color = guide_legend('Treatment (LD50)'), shape = guide_legend('Treatment (LD50)', override.aes = list(size = 2, alpha = 1)))+
+  ggbreak::scale_x_break(c(0.2, 2.9))+
+  theme(axis.text.x.top = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.line.x.top = element_blank(),
+        text = element_text(size = 7, family = 'arial'),
+        axis.line = element_line(colour = 'black', linewidth = global_linewidth),
+        axis.ticks = element_line(colour = "black", linewidth = global_linewidth))
+# plotly::ggplotly(p)
+noleg <- p + theme(legend.position = "none")
 
-gl <- gtbl$log2fc
-names(gl) <- gtbl$ENSEMBL
-
-
-gse <- clusterProfiler::gseGO(geneList=gl,
-                              ont ="BP",
-                              keyType = "ENSEMBL",
-                              minGSSize = 3,
-                              maxGSSize = 43,
-                              pvalueCutoff = 0.05,
-                              verbose = TRUE,
-                              OrgDb = org.Hs.eg.db,
-                              pAdjustMethod = "none")
-enrichplot::dotplot(gse, showCategory=10, split=".sign", label_format = 50) + facet_grid(.~.sign)
-
-
-#
-library(msigdbr)
-library(enrichplot)
-msigdbr::msigdbr_species()
-msigdbr::msigdbr_collections()
-cgp <- msigdbr::msigdbr(species = 'human', category = "C2")
-msigdbr_t2g = cgp %>% dplyr::distinct(gs_name, gene_symbol) %>% as.data.frame()
-prottbl_filtered <- prottbl %>% filter(Fwd > pcut & Rvs > pcut | Fwd < 1/ncut & Rvs < 1/ncut)
-
-et <- clusterProfiler::enricher(gene = prottbl_filtered$proteinName, TERM2GENE = msigdbr_t2g)
-enrichplot::dotplot(et, showCategory=10) #+ facet_grid(.~.sign)
-cnetplot(et)
-ridgeplot(et)
-
-mettl9 <- cgp %>% filter(gene_symbol == 'METTL9')
-trmu <- cgp %>% filter(gene_symbol == 'TRMU')
-pus7 <- cgp %>% filter(gene_symbol == 'PUS7')
-mto1 <- cgp %>% filter(gene_symbol == 'MTO1')
-wb <- openxlsx::createWorkbook();
-openxlsx::addWorksheet(wb, 'mettl9'); openxlsx::writeData(wb, 'mettl9', mettl9);
-openxlsx::addWorksheet(wb, 'trmu'); openxlsx::writeData(wb, 'trmu', trmu);
-openxlsx::addWorksheet(wb, 'pus7'); openxlsx::writeData(wb, 'pus7', pus7);
-openxlsx::addWorksheet(wb, 'mto1'); openxlsx::writeData(wb, 'mto1', mto1);
-openxlsx::openXL(wb)
-  
-
-  
-  
-  
+ggsave(filename = file.path(base, 'figures/noleg.svg'), device = 'svg', plot = noleg, width = 2.7, height = 2, units = 'in')
+ggsave(filename = file.path(base, 'figures/legend.svg'), device = 'svg', plot = p, width = 5, height = 5, units = 'in')
+# subscript, importing legend
 
 
-
-
-
-# protein Level using normalized ratio
-# mean_Fwd mean_Rvs
-# 0.843     1.18
-# ptbl %>% # summarise(mean_Fwd = mean(Fwd, na.rm = TRUE), mean_Rvs = mean(Rvs, na.rm = TRUE)) 
-#   # filter((Fwd < 2 & Rvs < 2)|(Fwd > 0.5 & Rvs > 0.5) ) %>% # summarise(mean_Fwd = mean(Fwd, na.rm = TRUE), mean_Rvs = mean(Rvs, na.rm = TRUE)) 
-#   mutate(across(c(Fwd,Rvs), mm, .names = '{.col}_normBy{.fn}')) %>% 
-#   # mutate(rsd = map2_dbl(Fwd_normByMean, Rvs_normByMean, rsd)) %T>% assign('t1',., envir = env) %>% 
-#   # filter(rsd < 0.2) %T>% assign('t2',., envir = env) %>% 
-#   group_by(`Protein Gene`) %>% 
-#   summarise(across(contains('normByMean'), ~list(.x))) %>% 
-#   ungroup() %>% 
-#   filter(!is.na(`Protein Gene`)) %>% View() # 13 peptides does not belong to a protein
-#   mutate(rsd = map2_dbl(Fwd_normByMean, Rvs_normByMean, rsd)) %T>% assign('t3',., envir = env) %>% 
-#   #filter(lengths(Fwd_normByMedian) > 1) %>% 
-#   mutate(across(contains('normByMean'), ~map_dbl(., ~mean(.x, na.rm = TRUE)))) %>% 
-#   mutate(rsd_scaled = ifelse(rsd > 0.5, 1, (rsd-min(rsd, na.rm = TRUE)) / (0.5 - min(rsd, na.rm = TRUE)))) %>% 
-#   separate(col = 'Protein Gene', into = c('proteinName', 'id'), sep = " ") %>% 
-#   separate(col = 'proteinName', into = c('proteinName', 'xx'), sep = '/' ) %>% 
-#   dplyr::select(-c(id, xx)) %T>% assign('t4',., envir = env)
-# 
-# t4 %>% 
-#   ggplot(aes(x = Fwd_normByMean, y = Rvs_normByMean))+
-#   geom_point(data = . %>% filter((Fwd_normByMean > 1/cutoff & Fwd_normByMean < cutoff) | (Rvs_normByMean > 1/cutoff & Rvs_normByMean < cutoff)), color = 'grey', size = 1)+
-#   geom_point(data = . %>% filter((Fwd_normByMean > cutoff & Rvs_normByMean > cutoff) | (Fwd_normByMean < 1/cutoff & Rvs_normByMean < 1/cutoff)), aes(alpha = 1-rsd_scaled), color = 'red', size = 1)+
-#   ggrepel::geom_label_repel(data = . %>% filter(Fwd_normByMean < 3 & Rvs_normByMean < 3 & Fwd_normByMean > cutoff & Rvs_normByMean > cutoff), aes(label = proteinName), box.padding = 0.5, max.overlaps = Inf)+
-#   # geom_point(data = . %>% filter(nchar(zincFinger) !=0 & `num<1.5` <= 2 & mean > 1.5) %>% filter(gn %in% c('POLD1')), aes(color = `Arsenite replaceable zinc-finger domain`), size = 1)+
-#   ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0, 3), ylim = c(0, 3), xintercept = 1, yintercept = 1, ratio = 1)+
-#   labs(x = "Fwd = Resistant(H) / WT(L)", y = "1/Rvs = Resistant(L) / WT(H)")+
-#   theme_classic()+ # increase x limit
-#   theme(legend.position = "none")
-# 
-# t4 %>% 
-#   ggplot(aes(x = Fwd_normByMean, y = Rvs_normByMean))+
-#   geom_point(data = . %>% filter((Fwd_normByMean > 1/cutoff & Fwd_normByMean < cutoff) | (Rvs_normByMean > 1/cutoff & Rvs_normByMean < cutoff)), color = 'grey', size = 1)+
-#   geom_point(data = . %>% filter((Fwd_normByMean > cutoff & Rvs_normByMean > cutoff) | (Fwd_normByMean < 1/cutoff & Rvs_normByMean < 1/cutoff)), aes(alpha = 1-rsd_scaled), color = 'red', size = 1)+
-#   ggrepel::geom_label_repel(data = . %>% filter(Fwd_normByMean < 1/2.5 & Rvs_normByMean < 1/2.5), aes(label = proteinName), box.padding = 0.5, max.overlaps = Inf)+
-#   # geom_point(data = . %>% filter(nchar(zincFinger) !=0 & `num<1.5` <= 2 & mean > 1.5) %>% filter(gn %in% c('POLD1')), aes(color = `Arsenite replaceable zinc-finger domain`), size = 1)+
-#   ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0, 0.7), ylim = c(0, 0.7), xintercept = 1, yintercept = 1, ratio = 1)+
-#   labs(x = "Fwd = Resistant(H) / WT(L)", y = "1/Rvs = Resistant(L) / WT(H)")+
-#   theme_classic()+ # increase x limit
-#   theme(legend.position = "none")
 
 
 
