@@ -97,6 +97,85 @@ p <- prottbl %>%
 ggsave(filename = file.path(base, 'figures/protein_dotplot.svg'), device = 'svg', plot = p, width = 3.5, height = 3.5, units = 'in')
 
 
+
+# mitochondrial ETC PRM monitoring in shTRMU -----
+# 1: H:shCtrl + L:TRMUsh2 (whole)
+# 2: H:TRMUsh2 + L:shCtrl (whole)
+# 3: H:shCtrl + L:TRMUsh3 (whole)
+# 4: H:TRMUsh3 + L:shCtrl (whole)
+# TRMU in whole proteome is not robust, change to mito fractionated TRMU (same cell, 1-4 whole, 5-8 mitofracitonation)
+ptbl <- bind_rows(read_csv(file.path(base, 'data', 'SILAC_peptideRatio_241125.csv')) %>% 
+                    filter(Peptide == 'TPNPDIVCNK') %>% 
+                    mutate(Replicate = case_when(
+                      Replicate == 5 ~ 1,
+                      Replicate == 6 ~ 2,
+                      Replicate == 7 ~ 3,
+                      Replicate == 8 ~ 4
+                    )),
+                  read_csv(file.path(base, 'data', 'SILAC_peptideRatio_whole_241125.csv')) %>% filter(Peptide != 'TPNPDIVCNK')) %>% 
+  separate_wider_regex('Protein Name', c(proteinName = ".*?", " |/", ".*")) %>% 
+  dplyr::mutate(`Total Area` = as.numeric(`Total Area`)) %>% 
+  dplyr::select(Peptide, `proteinName`, `Total Area`, `Isotope Label Type`, Replicate) %>% 
+  pivot_wider(names_from = c(`Isotope Label Type`), values_from = `Total Area`) %>%
+  dplyr::mutate(`shTRMU/shCtrl` = case_when(
+    Replicate == 1 | Replicate == 3 ~ light / heavy,
+    Replicate == 2 | Replicate == 4 ~ heavy / light
+  )) %>% 
+  dplyr::mutate(proteinName = fct_relevel(proteinName, 
+                                          'MT-CO2', 'MT-ATP6', 'MT-CYB',
+                                          'ETFA', 'ETFB', 'SDHA',  'TOMM40', 'ACTB', 'GAPDH', 'MTO1', 'TRMU'))
+# reporting the table
+wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptbl); openxlsx::openXL(wb)
+
+# dotplot: forward vs reverse
+ptbl %>% 
+  select(-light, -heavy) %>% 
+  mutate(labelType = ifelse(Replicate %in% c(1, 3), 'F', 'R')) %>% 
+  group_by(proteinName, labelType) %>% 
+  summarise(`k/c` = mean(`shTRMU/shCtrl`)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = c(labelType), values_from = `k/c`)%>%
+  ggplot(aes(x = F, y = R))+
+  geom_point(size = 0.5,  color = 'red')+
+  ggrepel::geom_label_repel(aes(label = proteinName), min.segment.length = 0)+
+  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0,3.5), ylim = c(0,3.5), xintercept = 1, yintercept = 1, ratio = 1)+
+  labs(x = "forward = shTRMU(H)/shCtrl(L)", y = "reverse = shTRMU(L)/shCtrl(H)")+
+  theme_classic() # increase x limit
+
+
+
+# mitochondrial ETC PRM monitoring in resistance vs senistive -----
+# F2: H:IGR37xp + L:IGR37 
+# R2: L:IGR37xp + H:IGR37
+ptbl <- read_csv(file.path(base, 'data', 'SILAC_peptideRatio_250205.csv')) %>% 
+  separate_wider_regex('Protein Name', c(proteinName = ".*?", " |/", ".*")) %>% 
+  mutate(`Total Area` = as.numeric(`Total Area`))%>% 
+  dplyr::select(Peptide, `proteinName`, `Total Area`, `Isotope Label Type`, Replicate) %>% 
+  pivot_wider(names_from = c(`Isotope Label Type`), values_from = `Total Area`)%>%
+  mutate(`r/s` = case_when(
+    Replicate == 'IV167_F2_MTendo' ~  heavy / light,
+    Replicate == 'IV167_R2_MTendo' ~  light / heavy
+  )) %>% 
+  mutate(proteinName = fct_relevel(proteinName, 
+                                   'MT-CO2', 'MT-ATP6', 'MT-ATP8', 
+                                   'ETFA', 'ETFB', 'SDHA', 'MRPL11','ACTB', 'GAPDH', 'MTO1', 'TRMU')) %>% 
+  filter(!(Replicate == 'IV167_R2_MTendo' &  proteinName == 'TRMU'))
+
+# export the table 
+wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptbl); openxlsx::openXL(wb)
+
+# dotplot: forward vs reverse
+ptbl %>% 
+  dplyr::select(-light, -heavy) %>% 
+  pivot_wider(names_from = c(Replicate), values_from = `r/s`)%>%
+  ggplot(aes(x = IV167_F2_MTendo, y = IV167_R2_MTendo))+
+  geom_point(size = 0.5,  color = 'red')+
+  ggrepel::geom_label_repel(aes(label = proteinName), min.segment.length = 0)+
+  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0,2.5), ylim = c(0,2.5), xintercept = 1, yintercept = 1, ratio = 1)+
+  labs(x = "forward = IGR37xp(H)/IGR37(L)", y = "reverse = IGR37xp(L)/IGR37(H)")+
+  theme_classic() # increase x limit
+
+
 # TRMU KD: experiments from following dates 1)247030_shTRMU_IGR37xl 2)240806_shTRMU_IGR37xl 3) 241007_TRMUrescue -------
 tbl <- readxl::read_excel(file.path(base, 'supplimentaryTable.xlsx'), sheet = 'S7.survival', range = 'R1C1:R126C9', na = '0') %>%  
   dplyr::filter(timepoint == 2) %>% 
