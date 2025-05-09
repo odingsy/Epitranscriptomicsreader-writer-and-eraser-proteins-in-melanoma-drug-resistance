@@ -1,8 +1,6 @@
 # Library, global functions and parameters  ----
 library(tidyverse)
-# library(magrittr)
 library(ggrepel)
-# library(drc)
 library(scales)
 base <- '/Users/shiyuanguo/Library/CloudStorage/GoogleDrive-sguo039@ucr.edu/My Drive/PhD_study/IGR_RWE/1.IGR37xp_manuscript'
 plot_shape = 20; plot_size = 0.5; plot_alpha = 0.4; plot_pos = '#F8766D'; global_linewidth <- 0.3 # ggploting parameters
@@ -184,7 +182,7 @@ prottbl %>%
         legend.background = element_blank())
 ggsave(filename = file.path(base, 'figures/protein_dotplot.svg'), device = 'svg', plot = p, width = 3.5, height = 3.5, units = 'in')
 
-# TODO split protein barplot into two
+# TODO split protein barplot into two seperate plots
 tb_num <- 10
 prottbl %>% 
   na.omit() %>% 
@@ -594,3 +592,47 @@ ptbl %>%
         strip.text.x = element_blank(),
         strip.background = element_rect(colour="white", fill="white"),
         legend.position=c(.8,.4))
+
+
+# visualizing the coverage of OXPHOS peptide using IRanges -----
+library(IRanges)
+
+## IRange Pp2. change xlim for better comparison 
+plotRanges_generic <- function(xlim){
+  function(x, main=deparse(substitute(x)), col="black", sep=0.5, ...){
+    height <- 1
+    if (is(xlim, "IntegerRanges") || is(xlim, "GenomicRanges"))
+      xlim <- c(min(start(xlim)), max(end(xlim)))
+    bins <- disjointBins(IRanges(start(x), end(x) + 1))
+    plot.new()
+    plot.window(xlim, c(0, max(bins)*(height + sep)))
+    ybottom <- bins * (sep + height) - height
+    rect(start(x)-0.5, ybottom, end(x)+0.5, ybottom + height, col=col, ...)
+    title(main)
+    axis(1)
+  }
+}
+
+plotRanges <- plotRanges_generic(xlim = c(40, 145))
+
+tbl <- readxl::read_excel('/Users/shiyuanguo/Library/CloudStorage/GoogleDrive-sguo039@ucr.edu/My Drive/PhD_study/IGR_RWE/1.IGR37xp_manuscript/data/ETC_annotation.xlsx', sheet = 'quantification', range = readxl::cell_rows(1:37)) %>% 
+  mutate(`t start (min)` = ifelse(`t start (min)` < 40, 40, `t start (min)`),
+         `t stop (min)` = ifelse(`t stop (min)`> 145, 145, `t stop (min)`)) # only plot from 40 to 145
+
+par(mfrow = c(1,1))
+ir <- IRanges(tbl$`t start (min)`, tbl$`t stop (min)`)
+plotRanges(ir)
+
+cov <- coverage(ir)
+cov <- as.vector(cov)
+mat <- cbind(seq_along(cov)-0.5, cov) 
+d <- diff(cov) != 0
+mat <- rbind(cbind(mat[d,1]+1, mat[d,2]), mat)
+mat <- mat[order(mat[,1]), ]
+
+plotRanges_generic(ir)(ir)
+lines(mat, col = "red", lwd = 4)
+axis(2)
+
+
+
