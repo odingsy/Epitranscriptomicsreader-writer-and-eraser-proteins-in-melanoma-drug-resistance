@@ -113,60 +113,28 @@ prottbl <- bind_rows(
   ungroup() %>% 
   arrange(desc(log2fc))
 
-# # shortlist peptides based on mean protein ratios
-# th <- 2
-# gt_ls <- prottbl %>% filter(Fwd > th & Rvs > th) %>% pull(proteinName)
-# gt_tbl <- ptbl %>% 
-#   group_by(proteinName) %>% 
-#   filter(proteinName %in% gt_ls) %>% 
-#   ungroup()
-# lt_ls <- prottbl %>% filter(Fwd < 1/th & Rvs < 1/th) %>% pull(proteinName)
-# lt_tbl <- ptbl %>% 
-#   group_by(proteinName) %>% 
-#   filter(proteinName %in% lt_ls) %>% 
-#   ungroup()
-# wb <- openxlsx::createWorkbook(); 
-# tn <- 'PRM_RWE_fulllist'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, ptbl);
-# tn <- 'gt'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, gt_tbl); 
-# tn <- 'lt'; openxlsx::addWorksheet(wb, tn); openxlsx::writeData(wb, tn, lt_tbl); 
-# openxlsx::openXL(wb)
+
 
 # output quantifiable protein arranged in desc order protein level fc
-# pplist <- ptbl %>%
-#   rowwise() %>% 
-#   mutate(mean_peptidelvl = mean(c(Fwd, Rvs), na.rm = TRUE),
-#     log2fc_peptidelvl = log2(mean_peptidelvl)) %>% 
-#   ungroup() %>% 
-#   group_by(proteinName) %>% # using `group_by` followed by `summarise` instead of `nest` to get two list-col for fwd and rvs respectively. 
-#   mutate(across(matches('Fwd|Rvs'), ~list(.x))) %>% 
-#   ungroup() %>%
-#   rowwise() %>% 
-#   mutate(mean_proteinlvl = mean(c(Fwd, Rvs), na.rm = TRUE),
-#     log2fc_proteinlvl = log2(mean_proteinlvl)) %>% 
-#   dplyr::arrange(desc(log2fc_proteinlvl)) %>% 
-#   ungroup() %>%
-#   group_by(proteinName) %>%
-#   nest() %>%
-#   ungroup() %>%
-#   mutate(rnum = row_number()) %>%
-#   mutate(shade = case_when(
-#     rnum %% 2 == 1 ~ 0,
-#     rnum %% 2 == 0 ~ 1,
-#   )) %>% 
-#   unnest(data) %>% 
-#   dplyr::select(-Fwd, -Rvs)
-# wb <- openxlsx::createWorkbook(); 
-# openxlsx::addWorksheet(wb, 'test'); 
-# lsty1 <-  openxlsx::createStyle(bgFill = "#d6d2d2")
-# openxlsx::conditionalFormatting(wb, 'test', rows = 1:(nrow(pplist)+1), cols = 1:ncol(pplist), rule = paste0("$", LETTERS[which(colnames(pplist) == "shade")], "1==", 1), style = lsty1)
-# openxlsx::writeData(wb, 'test', pplist); 
-# openxlsx::openXL(wb)
+pplist <- prottbl %>% 
+  dplyr::mutate(rnum = row_number()) %>%
+  mutate(shade = case_when(
+    rnum %% 2 == 1 ~ 0,
+    rnum %% 2 == 0 ~ 1,
+  )) %>%
+  dplyr::select(-log2Fwd, -log2Rvs)
+wb <- openxlsx::createWorkbook();
+openxlsx::addWorksheet(wb, 'test');
+lsty1 <-  openxlsx::createStyle(bgFill = "#d6d2d2")
+openxlsx::conditionalFormatting(wb, 'test', rows = 1:(nrow(pplist)+1), cols = 1:ncol(pplist), rule = paste0("$", LETTERS[which(colnames(pplist) == "shade")], "1==", 1), style = lsty1)
+openxlsx::writeData(wb, 'test', pplist);
+openxlsx::openXL(wb)
 
 # protein dot plot 
 cf <- 1
 gt_ls <- prottbl %>% filter(log2fc > cf) %>% na.omit()
 lt_ls <- prottbl %>% filter(log2fc < -cf) %>% na.omit()
-prottbl %>% 
+p <- prottbl %>% 
   ggplot(aes(x = log2Fwd, y = log2Rvs), shape = plot_shape)+
   geom_point(color = 'grey', size = plot_size, alpha = plot_alpha)+
   geom_point(data = bind_rows(gt_ls, lt_ls), color = plot_pos, size = plot_size)+
@@ -180,36 +148,40 @@ prottbl %>%
         # panel.border = element_rect(colour = "black", fill=NA),
         legend.box.background = element_rect(colour = "black"),
         legend.background = element_blank())
-ggsave(filename = file.path(base, 'figures/protein_dotplot.svg'), device = 'svg', plot = p, width = 3.5, height = 3.5, units = 'in')
+ggsave(filename = file.path(base, 'figures/protein_dotplot.pdf'), device = 'pdf', plot = p, width = 5, height = 5, units = 'in')
 
-# TODO split protein barplot into two seperate plots
+# split protein barplot into two seperate plots
 tb_num <- 10
-prottbl %>% 
+p <- prottbl %>% 
   na.omit() %>% 
-  mutate(proteinName = fct_reorder(proteinName, log2fc)) %>%
+  mutate(proteinName = fct_reorder(proteinName, desc(log2fc))) %>%
   slice(1:tb_num, (n()-tb_num + 1):n()) %>% 
   select(proteinName, F1:R2) %>% 
   pivot_longer(-proteinName, names_to = 'replicates', values_to = 'ratios') %>% 
   mutate(fr = str_extract(replicates, '[:alpha:]'),
-         tb = ratios > 1) %>% 
-  ggplot(aes(proteinName, ratios))+
+         tb = ratios > 1,
+         log2ratios = log2(ratios)) %>% 
+  ggplot(aes(proteinName, log2ratios))+
   stat_summary(aes(fill = tb), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
-  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), color = 'black', width = 0.2 )+
-  geom_hline(yintercept=1, linetype="dashed",color = plot_pos, linewidth = .5)+
-  geom_point(aes(color = fr), size = 2)+
-  coord_flip()+
+  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), 
+               color = 'black', width = 0.2,linewidth = 0.16)+
+  geom_point(aes(color = fr), size = 0.7)+
   ylab('Log2(IGR37xp / IGR37)')+
-  scale_y_continuous(trans = scales::log2_trans(), breaks = c(0.25, 0.5, 1, 2, 4, 6))+
+  ggh4x::coord_axes_inside(labels_inside = TRUE, ylim = c(-3, 3), yintercept = 0)+
   scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 8)[c(1,8)])+ # dot color
   # scale_fill_manual(values = )+
-  guides(fill = FALSE, color = guide_legend(override.aes = list(size = 0.5)))+
+  guides(fill = 'none', color = guide_legend(override.aes = list(size = 0.5)))+
   theme_classic()+
   theme(legend.title=element_blank(),
         legend.text = element_text(size = 6),
         legend.key.size = unit(0.5, "lines"),
         strip.text.x = element_blank(),
+        axis.text.x = element_text(size = 6, angle = 45, vjust = 0.2, hjust = 0.2),
+        axis.title.y = element_text(size = 6),
+        axis.text.y = element_text(size = 6),
         strip.background = element_rect(colour="white", fill="white"),
-        legend.position=c(.8,.4))
+        legend.position=c(.8,.8))
+ggsave(filename = file.path(base, 'figures/protein_batplot.pdf'), device = 'pdf', plot = p, width = 6.2, height = 2, units = 'in')
 
 
 # mitochondrial ETC PRM monitoring in shTRMU -----
@@ -634,5 +606,24 @@ plotRanges_generic(ir)(ir)
 lines(mat, col = "red", lwd = 4)
 axis(2)
 
-
-
+# choose diverse for spectra
+cp <- c(hcl.colors(hcl.pals('diverging')[1], n = 4),
+           hcl.colors(hcl.pals('diverging')[2], n = 4),
+           hcl.colors(hcl.pals('diverging')[3], n = 4),
+           hcl.colors(hcl.pals('diverging')[4], n = 4),
+           hcl.colors(hcl.pals('diverging')[5], n = 4),
+           hcl.colors(hcl.pals('diverging')[6], n = 4),
+           hcl.colors(hcl.pals('diverging')[6], n = 4),
+           hcl.colors(hcl.pals('diverging')[7], n = 4),
+           hcl.colors(hcl.pals('diverging')[8], n = 4),
+           hcl.colors(hcl.pals('diverging')[9], n = 4),
+           hcl.colors(hcl.pals('diverging')[10], n = 4),
+           hcl.colors(hcl.pals('diverging')[11], n = 4),
+           hcl.colors(hcl.pals('diverging')[12], n = 4),
+           hcl.colors(hcl.pals('diverging')[13], n = 4),
+           hcl.colors(hcl.pals('diverging')[14], n = 4),
+           hcl.colors(hcl.pals('diverging')[15], n = 4),
+           hcl.colors(hcl.pals('diverging')[16], n = 4)
+           )[c(1,2,3,4,8,15,16,21,30,31,35,36,41,44,49,52, 64, 65)]
+show_col(cp)
+cp
