@@ -114,7 +114,6 @@ prottbl <- bind_rows(
   arrange(desc(log2fc))
 
 
-
 # output quantifiable protein arranged in desc order protein level fc
 pplist <- prottbl %>% 
   dplyr::mutate(rnum = row_number()) %>%
@@ -150,7 +149,7 @@ p <- prottbl %>%
         legend.background = element_blank())
 ggsave(filename = file.path(base, 'figures/protein_dotplot.pdf'), device = 'pdf', plot = p, width = 5, height = 5, units = 'in')
 
-# split protein barplot into two seperate plots
+# barplot
 tb_num <- 10
 p <- prottbl %>% 
   na.omit() %>% 
@@ -184,139 +183,20 @@ p <- prottbl %>%
 ggsave(filename = file.path(base, 'figures/protein_batplot.pdf'), device = 'pdf', plot = p, width = 6.2, height = 2, units = 'in')
 
 
-# mitochondrial ETC PRM monitoring in shTRMU -----
-# 1: H:shCtrl + L:TRMUsh2 (whole)
-# 2: H:TRMUsh2 + L:shCtrl (whole)
-# 3: H:shCtrl + L:TRMUsh3 (whole)
-# 4: H:TRMUsh3 + L:shCtrl (whole)
-# TRMU in whole proteome is not robust, change to mito fractionated TRMU (same cell, 1-4 whole, 5-8 mitofracitonation)
-ptblkd <- bind_rows(read_csv(file.path(base, 'data', 'SILAC_peptideRatio_241125.csv')) %>% 
-                    filter(Peptide == 'TPNPDIVCNK') %>% 
-                    mutate(Replicate = case_when(
-                      Replicate == 5 ~ 1,
-                      Replicate == 6 ~ 2,
-                      Replicate == 7 ~ 3,
-                      Replicate == 8 ~ 4
-                    )),
-                  read_csv(file.path(base, 'data', 'SILAC_peptideRatio_whole_241125.csv')) %>% filter(Peptide != 'TPNPDIVCNK')) %>% 
-  separate_wider_regex('Protein Name', c(proteinName = ".*?", " |/", ".*")) %>% 
-  dplyr::mutate(`Total Area` = as.numeric(`Total Area`)) %>% 
-  dplyr::select(Peptide, `proteinName`, `Total Area`, `Isotope Label Type`, Replicate) %>% 
-  pivot_wider(names_from = c(`Isotope Label Type`), values_from = `Total Area`) %>%
-  dplyr::mutate(`shTRMU/shCtrl` = case_when(
-    Replicate == 1 | Replicate == 3 ~ light / heavy,
-    Replicate == 2 | Replicate == 4 ~ heavy / light
-  )) %>% 
-  dplyr::mutate(proteinName = fct_relevel(proteinName, 
-                                          'MT-CO2', 'MT-ATP6', 'MT-CYB',
-                                          'ETFA', 'ETFB', 'SDHA',  'TOMM40', 'ACTB', 'GAPDH', 'MTO1', 'TRMU'))
-# reporting the table
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptblkd); openxlsx::openXL(wb)
-# cratiotbl <- ptblkd %>% 
-#   dplyr::select(Peptide, proteinName, `shTRMU/shCtrl`) %>% 
-#   nest(data = -c(Peptide, proteinName)) %>% 
-#   mutate(ratiopaste = map_chr(data, ~(paste0(signif(.x$`shTRMU/shCtrl`, digits = 3), collapse = ',') )))
-# wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', cratiotbl); openxlsx::openXL(wb)
-
-# dotplot: forward vs reverse
-# ptblkd %>% 
-#   dplyr::select(-light, -heavy) %>% 
-#   mutate(labelType = ifelse(Replicate %in% c(1, 3), 'F', 'R')) %>% 
-#   group_by(proteinName, labelType) %>% 
-#   summarise(`k/c` = mean(`shTRMU/shCtrl`)) %>% 
-#   ungroup() %>% 
-#   pivot_wider(names_from = c(labelType), values_from = `k/c`)%>%
-#   ggplot(aes(x = F, y = R))+
-#   geom_point(size = 0.5,  color = 'red')+
-#   ggrepel::geom_label_repel(aes(label = proteinName), min.segment.length = 0)+
-#   ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0,3.5), ylim = c(0,3.5), xintercept = 1, yintercept = 1, ratio = 1)+
-#   labs(x = "forward = shTRMU(H)/shCtrl(L)", y = "reverse = shTRMU(L)/shCtrl(H)")+
-#   theme_classic() # increase x limit
-
-
-
-# mitochondrial ETC PRM monitoring in resistance vs senistive -----
-# F2: H:IGR37xp + L:IGR37 
-# R2: L:IGR37xp + H:IGR37
-ptblendo <- read_csv(file.path(base, 'data', 'SILAC_peptideRatio_250205.csv')) %>% 
-  separate_wider_regex('Protein Name', c(proteinName = ".*?", " |/", ".*")) %>% 
-  mutate(`Total Area` = as.numeric(`Total Area`))%>% 
-  dplyr::select(Peptide, `proteinName`, `Total Area`, `Isotope Label Type`, Replicate) %>% 
-  pivot_wider(names_from = c(`Isotope Label Type`), values_from = `Total Area`)%>%
-  mutate(`r/s` = case_when(
-    Replicate == 'IV167_F2_MTendo' ~  heavy / light,
-    Replicate == 'IV167_R2_MTendo' ~  light / heavy
-  )) %>% 
-  mutate(proteinName = fct_relevel(proteinName, 
-                                   'MT-CO2', 'MT-ATP6', 'MT-ATP8', 
-                                   'ETFA', 'ETFB', 'SDHA', 'MRPL11','ACTB', 'GAPDH', 'MTO1', 'TRMU')) %>% 
-  filter(!(Replicate == 'IV167_R2_MTendo' &  proteinName == 'TRMU'))
-
-# export the table 
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptblendo); openxlsx::openXL(wb)
-# cratiotbl <- ptblendo %>% 
-#   dplyr::select(Peptide, proteinName, `r/s`) %>% 
-#   nest(data = -c(Peptide, proteinName)) %>% 
-#   mutate(ratiopaste = map_chr(data, ~(paste0(signif(.x$`r/s`, digits = 3), collapse = ',') )))
-# wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', cratiotbl); openxlsx::openXL(wb)
-
-# dotplot: forward vs reverse
-# ptblendo %>% 
-#   dplyr::select(-light, -heavy) %>% 
-#   pivot_wider(names_from = c(Replicate), values_from = `r/s`)%>%
-#   ggplot(aes(x = IV167_F2_MTendo, y = IV167_R2_MTendo))+
-#   geom_point(size = 0.5,  color = 'red')+
-#   ggrepel::geom_label_repel(aes(label = proteinName), min.segment.length = 0)+
-#   ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0,2.5), ylim = c(0,2.5), xintercept = 1, yintercept = 1, ratio = 1)+
-#   labs(x = "forward = IGR37xp(H)/IGR37(L)", y = "reverse = IGR37xp(L)/IGR37(H)")+
-#   theme_classic() # increase x limit
-
-
-# correlation plot between pblkd and pblendo ----
-commprot <- ptblkd$proteinName[ptblkd$proteinName %in% ptblendo$proteinName] |> unique() |> as.character()
-p <- bind_rows(
-  ptblkd %>% 
-  filter(proteinName %in% commprot) %>% 
-  mutate(dataname = 'kd') %>% 
-  mutate(ratios = `shTRMU/shCtrl`, .keep = 'unused') %>% 
-  dplyr::select(proteinName, dataname, ratios), 
-  ptblendo %>% 
-  filter(proteinName %in% commprot) %>% 
-  mutate(dataname = 'endo') %>% 
-  mutate(ratios = `r/s`, .keep = 'unused') %>% 
-  dplyr::select(proteinName, dataname, ratios)) %>% 
-  pivot_wider(names_from = dataname, values_from = ratios, values_fn = ~ mean(.x, na.rm = TRUE)) %>% 
-  ggplot(aes(x = kd, y = endo), shape = plot_shape)+
-  geom_point(color = plot_pos, size = plot_size)+
-  ggrepel::geom_text_repel(aes(label = proteinName), size= 3, force_pull = 10, force = 1, min.segment.length = 0.1, max.overlaps = 5)+
-  scale_x_continuous(trans = scales::log2_trans(), breaks = c(.2, .5,1 ,2,5))+
-  scale_y_continuous(trans = scales::log2_trans(),breaks = c(.2, .5 ,2,5))+
-  ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0.2, 5), ylim = c(0.2, 5), xintercept = 0, yintercept = 0, ratio = 1)+
-  labs(x = "Log2(shTRMU / shCtrl)", y = "Log2(IGR37xp/IGR37)")+
-  theme_classic()+ # increase x limit
-  theme(legend.position = "none",
-        # panel.border = element_rect(colour = "black", fill=NA),
-        legend.box.background = element_rect(colour = "black"),
-        legend.background = element_blank())
-ggsave(filename = file.path(base, 'figures/corr_shTRMUvsEndo.svg'), device = 'svg', plot = p, width = 3.5, height = 3.5, units = 'in')
-
 # OXPHOS protein quantification -----
 tbl <- readxl::read_excel(file.path(base, 'data', 'ETC_annotation.xlsx'), sheet = 'quantification', range = readxl::cell_rows(1:37)) %>% 
   mutate(LH = ifelse(str_detect(Compound, '\\((K8|R6)\\)$'), 'H', 'L')) 
 
 
-# shTRMU / shCtrl in IGR37xp cells (runs included in the analysis: )
-# before Correction: IV198_13_20250501221836, IV198_3_20250503145202, IV200_2, IV199_5, IV198_14_20250503005930,  IV200_3, IV199_6
-# after correction:IV200_8, IV200_6, IV200_16, IV200_12, IV200_9, IV200_13
-# after correction corresponding non corrected: IV198_13_20250501221836, IV198_3_20250503145202, IV200_2,IV199_5, IV198_14_20250503005930,IV199_6
-ptbl <- tbl %>% 
-  # select(proteinName, LH, IV198_13_20250501221836, IV198_3_20250503145202, IV200_2, IV199_5, IV198_14_20250503005930,  IV200_3, IV199_6) %>%  
-  select(proteinName, LH, IV200_8, IV200_6, IV200_16, IV200_12, IV200_9, IV200_13) %>%
+# shTRMU / shCtrl in IGR37xp cells 
+# runs included in the analysis: IV200_6, IV200_9, IV200_13
+kd <- tbl %>% 
+  select(proteinName, LH, IV200_6, IV200_9, IV200_13) %>%
   pivot_longer(where(is.double), names_to = 'sample', values_to = 'amt') %>% 
   pivot_wider(names_from = 'LH', values_from = 'amt') %>%
   mutate(ratio = case_when(
-    str_detect(sample, '(IV198_13|IV198_3|IV200_2|IV199_5|IV200_8|IV200_6|IV200_16|IV200_12)') ~ H / L,
-    str_detect(sample, '(IV198_14|IV200_3|IV199_6|IV200_9|IV200_13)')  ~ L / H,
+    str_detect(sample, 'IV200_6') ~ H / L,
+    str_detect(sample, 'IV200_(9|13)')  ~ L / H,
     .default = 0.0
   )) %>%
   filter(proteinName != 'ACTB') %>% 
@@ -336,127 +216,9 @@ ptbl <- tbl %>%
   ))
 
 
-# ptbl %>% 
-#   filter(sample %in% c('IV198_14', 'IV200_9')) %>% 
-#   select(proteinName, sample, mratio) %>% 
-#   pivot_wider( names_from = 'sample', values_from = 'mratio') %>% 
-# ggplot(aes(x = IV198_14, y = IV200_9))+
-# geom_point()+
-# ggh4x::coord_axes_inside(labels_inside = TRUE, xlim = c(0, 3), ylim = c(0, 3),  ratio = 1)+
-#   theme_classic()
-
-
-
-# ratiotable
-ratiotab <- ptbl %>%
-  select(proteinName, sample, mratio, whereEncode) %>%
-  pivot_wider(names_from = 'sample', values_from = 'mratio') %>%
-  # select(proteinName, whereEncode, IV198_13, IV198_3, IV200_2,  IV199_5, IV198_14,  IV200_3, IV199_6) %>%
-  select(proteinName, whereEncode, IV200_8, IV200_6, IV200_16, IV200_12, IV200_9, IV200_13) %>%
-  arrange(proteinName)
-# wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptbl); openxlsx::openXL(wb)
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ratiotab); openxlsx::openXL(wb)
-
-# barplot
-ptbl %>%
-  filter(!sample %in% c('IV200_12', 'IV200_16', 'IV200_8')) %>% 
-  # mutate(peptide_gn = sprintf(paste0('%s', '%',7-nchar(gn)+10, 's'), Sequence, gn) %>% factor(., levels = rev(.))) %>% 
-  ggplot(aes(proteinName, mratio))+
-  stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
-  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), color = 'black', width = 0.2 )+
-  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
-  geom_point(aes(color = sample), size = 2)+
-  coord_flip()+
-  ylab('shTRMU / shCtrl in IGR37xp')+
-  scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 10)[c(1,3,6,10)])+ # dot color
-  # scale_fill_manual(values = c(replication, repair, splicing))+
-  guides(fill = 'none', color = guide_legend(override.aes = list(size = 0.5)))+
-  theme_classic()+
-  theme(axis.title.y = element_blank(), 
-        legend.title=element_blank(),
-        legend.text = element_text(size = 6),
-        legend.key.size = unit(0.5, "lines"),
-        strip.text.x = element_blank(),
-        strip.background = element_rect(colour="white", fill="white"),
-        legend.position=c(.8,.4))
-
-# heatmap
-ptbl %>% 
-  filter(!sample %in% c('IV200_12', 'IV200_16', 'IV200_8')) %>% 
-  ggplot(aes(x = sample, y = proteinName, fill = mratio)) +
-    geom_tile() +
-    scale_fill_gradientn(colors = c("blue", "white", "red")) + # Choose your color scale
-    theme_minimal() + # A clean theme
-    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotate x-axis labels
-    labs(title = "Gene Expression Heatmap",
-         x = "Sample",
-         y = "Gene",
-         fill = "Expression Level")
-
-
-# shTRMU / shCtrl in HEK293T ----
-# before Correction: IV198_1, IV198_15_20250430191613, IV199_7, IV198_2_20250503113248, IV198_16_20250501015535, IV198_16, IV199_8
-# after correction:IV200_4, IV200_10, IV200_14, IV200_5, IV200_11, IV200_15
-ptbl <- tbl %>% 
-  # select(proteinName, LH, IV198_1, IV198_15_20250430191613, IV199_7, IV198_2_20250503113248, IV198_16_20250501015535, IV198_16, IV199_8) %>% 
-  select(proteinName, LH, IV200_4, IV200_10, IV200_14, IV200_5, IV200_11, IV200_15) %>%  
-  pivot_longer(where(is.double), names_to = 'sample', values_to = 'amt') %>% 
-  pivot_wider(names_from = 'LH', values_from = 'amt') %>%
-  mutate(ratio = case_when(
-    str_detect(sample, '(IV198_1|IV198_15|IV199_7|IV200_4|IV200_10|IV200_14)') ~ H / L,
-    str_detect(sample, '(IV198_2|IV198_16|IV199_8|IV200_5|IV200_11|IV200_15)')  ~ L / H,
-    .default = 0.0
-  )) %>% 
-  filter(proteinName != 'ACTB') %>% 
-  mutate(proteinName = ifelse(proteinName == 'ACTB_VAP', 'ACTB', proteinName)) %>% # replace back to ACTB to obtain ratio mean later
-  filter(!is.na(ratio)) %>% 
-  mutate(sample = str_extract(sample, '^([^_-]+_[^_-]+)?')) %>% # from gemini!! 
-  group_by(proteinName, sample) %>% 
-  summarize(mratio = mean(ratio, na.rm = TRUE),
-            rsd = sd(ratio, na.rm = TRUE) / mratio) %>% 
-  ungroup() %>% 
-  mutate(whereEncode = ifelse(str_detect(proteinName, 'MT-'), 'MT', 'nuc')) %>% 
-  dplyr::mutate(proteinName = fct_relevel(proteinName, 
-                                          'TRMU', 'MTO1', 'ACTB', 'GAPDH',  #4
-                                          'ETFA', 'SDHA', 'MRPL11' ,'TOMM40', #4
-                                          'MT-ND6', 'MT-ND5', 'MT-ND4', 'MT-ND3', #4
-                                          'MT-CYB', 'MT-ATP8', 'MT-ATP6', 'MT-CO3', 'MT-CO2',#5
-  )) 
-
-# ratiotable
-ratiotab <- ptbl %>%
-  select(proteinName, sample, mratio, whereEncode) %>%
-  pivot_wider(names_from = 'sample', values_from = 'mratio') %>%
-  # select(proteinName, whereEncode, IV198_1, IV198_15, IV199_7, IV198_2, IV198_16, IV199_8) %>%
-  select(proteinName, whereEncode, IV200_4, IV200_10, IV200_14, IV200_5, IV200_11, IV200_15) %>%
-  arrange(proteinName)
-# wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ptbl); openxlsx::openXL(wb)
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ratiotab); openxlsx::openXL(wb)
-
-ptbl %>% 
-  filter(!sample %in% c('IV200_10', 'IV200_14', 'IV200_5')) %>% 
-  # mutate(peptide_gn = sprintf(paste0('%s', '%',7-nchar(gn)+10, 's'), Sequence, gn) %>% factor(., levels = rev(.))) %>% 
-  ggplot(aes(proteinName, mratio))+
-  stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
-  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), color = 'black', width = 0.2 )+
-  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
-  geom_point(aes(color = sample), size = 2)+
-  coord_flip()+
-  ylab('shTRMU / shCtrl in HEK293T')+
-  scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 10)[c(1,3, 6,10)])+ # dot color
-  # scale_fill_manual(values = c(replication, repair, splicing))+
-  guides(fill = FALSE, color = guide_legend(override.aes = list(size = 0.5)))+
-  theme_classic()+
-  theme(axis.title.y = element_blank(), 
-        legend.title=element_blank(),
-        legend.text = element_text(size = 6),
-        legend.key.size = unit(0.5, "lines"),
-        strip.text.x = element_blank(),
-        strip.background = element_rect(colour="white", fill="white"),
-        legend.position=c(.8,.4))
-
-# MTO1 KO / IGR37xp (IV198_8	IV198_12, IV198_7_20250505001525) -----
-ptbl <- tbl %>% 
+# MTO1 KO / IGR37xp 
+# runs included in the analysis: IV198_8	IV198_12, IV198_7_20250505001525)
+mto1ko <- tbl %>% 
   select(proteinName, LH, IV198_8, IV198_12) %>%  
   pivot_longer(where(is.double), names_to = 'sample', values_to = 'amt') %>% 
   pivot_wider(names_from = 'LH', values_from = 'amt') %>%
@@ -481,36 +243,11 @@ ptbl <- tbl %>%
                                           'MT-CYB', 'MT-ATP8', 'MT-ATP6', 'MT-CO3', 'MT-CO2',#5
   ))
 
-# ratiotable 
-ratiotab <- ptbl %>% 
-  select(proteinName, sample, mratio, whereEncode) %>% 
-  pivot_wider(names_from = 'sample', values_from = 'mratio') %>% 
-  arrange(proteinName)
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ratiotab); openxlsx::openXL(wb)
 
-ptbl %>% 
-  # mutate(peptide_gn = sprintf(paste0('%s', '%',7-nchar(gn)+10, 's'), Sequence, gn) %>% factor(., levels = rev(.))) %>% 
-  ggplot(aes(proteinName, mratio))+
-  stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
-  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), color = 'black', width = 0.2 )+
-  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
-  geom_point(aes(color = sample), size = 2)+
-  coord_flip()+
-  ylab('MTO1 KO / IGR37xp')+
-  scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 8)[c(1,5,8)])+ # dot color
-  # scale_fill_manual(values = c(replication, repair, splicing))+
-  guides(fill = FALSE, color = guide_legend(override.aes = list(size = 0.5)))+
-  theme_classic()+
-  theme(axis.title.y = element_blank(), 
-        legend.title=element_blank(),
-        legend.text = element_text(size = 6),
-        legend.key.size = unit(0.5, "lines"),
-        strip.text.x = element_blank(),
-        strip.background = element_rect(colour="white", fill="white"),
-        legend.position=c(.8,.4))
 
-# DONE IGR37xp / IGR37 (runs included in the analysis: IV198_5_20250502113912, IV198_6_20250502145929, IV198_9) ----
-ptbl <- tbl %>% 
+# DONE IGR37xp / IGR37 
+# runs included in the analysis: IV198_5_20250502113912, IV198_6_20250502145929, IV198_9
+endo <- tbl %>% 
   select(proteinName, LH, IV198_5_20250502113912, IV198_6_20250502145929, IV198_9) %>% 
   pivot_longer(where(is.double), names_to = 'sample', values_to = 'amt') %>% 
   pivot_wider(names_from = 'LH', values_from = 'amt') %>% 
@@ -527,7 +264,7 @@ ptbl <- tbl %>%
   summarize(mratio = mean(ratio, na.rm = TRUE),
             rsd = sd(ratio, na.rm = TRUE) / mratio) %>% 
   ungroup() %>% 
-  mutate(whereEncode = ifelse(str_detect(proteinName, 'MT-'), 'MT', 'nuc')) %>% 
+  mutate(whereEncode = ifelse(str_detect(proteinName, 'MT-'), 'MT', 'nuc'))%>% 
   dplyr::mutate(proteinName = fct_relevel(proteinName, 
                                           'TRMU', 'MTO1', 'ACTB', 'GAPDH',  #4
                                           'ETFA', 'SDHA', 'MRPL11' ,'TOMM40', #4
@@ -535,27 +272,20 @@ ptbl <- tbl %>%
                                           'MT-CYB', 'MT-ATP8', 'MT-ATP6', 'MT-CO3', 'MT-CO2',#5
   ))
 
-# ratiotable 
-ratiotab <- ptbl %>% 
-  select(proteinName, sample, mratio, whereEncode) %>% 
-  pivot_wider(names_from = 'sample', values_from = 'mratio') %>% 
-  arrange(proteinName)
-wb <- openxlsx::createWorkbook(); openxlsx::addWorksheet(wb, 'test'); openxlsx::writeData(wb, 'test', ratiotab); openxlsx::openXL(wb)
 
-# barplot
-ptbl %>% 
-  # filter(!proteinName %in% c('TRMU', 'MTO1', 'ACTB')) %>% 
-  # mutate(peptide_gn = sprintf(paste0('%s', '%',7-nchar(gn)+10, 's'), Sequence, gn) %>% factor(., levels = rev(.))) %>% 
+# 1.barplot endogenous
+p1 <- endo %>% 
   ggplot(aes(proteinName, mratio))+
   stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
-  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), color = 'black', width = 0.2 )+
-  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
-  geom_point(aes(color = sample), size = 2)+
+  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), 
+               color = 'black', width = 0.2, linewidth = global_linewidth)+
+  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = global_linewidth)+
+  geom_point(aes(color = sample), size = plot_size)+
   coord_flip()+
   ylab('IGR37xp / IGR37')+
   scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 8)[c(1,2,7,8)])+ # dot color
   # scale_fill_manual(values = )+
-  guides(fill = FALSE, color = guide_legend(override.aes = list(size = 0.5)))+
+  guides(fill = FALSE, color = FALSE)+
   theme_classic()+
   theme(axis.title.y = element_blank(), 
         legend.title=element_blank(),
@@ -565,6 +295,76 @@ ptbl %>%
         strip.background = element_rect(colour="white", fill="white"),
         legend.position=c(.8,.4))
 
+# 2.barplot shTRMU
+p2 <- kd %>%
+  ggplot(aes(proteinName, mratio))+
+  stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
+  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), 
+               color = 'black', width = 0.2, linewidth = global_linewidth)+
+  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
+  geom_point(aes(color = sample), size = plot_size)+
+  coord_flip()+
+  ylab('shTRMU / shCtrl in IGR37xp')+
+  scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 10)[c(1,3,6,10)])+ # dot color
+  # scale_fill_manual(values = c(replication, repair, splicing))+
+  guides(fill = FALSE, color = FALSE)+
+  theme_classic()+
+  theme(axis.title.y = element_blank(), 
+        legend.title=element_blank(),
+        legend.text = element_text(size = 6),
+        legend.key.size = unit(0.5, "lines"),
+        strip.text.x = element_blank(),
+        strip.background = element_rect(colour="white", fill="white"),
+        legend.position=c(.8,.4))
+
+# 3. barplot MTO1ko
+p3 <- mto1ko %>% 
+  ggplot(aes(proteinName, mratio))+
+  stat_summary(aes(fill = whereEncode), geom = 'bar', fun = 'mean' , na.rm = TRUE, width = .5)+
+  stat_summary(geom = 'errorbar', fun.min = function(y) mean(y, na.rm = TRUE) - sd(y, na.rm = TRUE), fun.max = function(y) mean(y, na.rm = TRUE) + sd(y, na.rm = TRUE), 
+               color = 'black', width = 0.2, linewidth = global_linewidth)+
+  geom_hline(yintercept=1, linetype="dashed",color = "red", linewidth = .5)+
+  geom_point(aes(color = sample), size = plot_size)+
+  coord_flip()+
+  ylab('MTO1 KO / IGR37xp')+
+  scale_color_manual(values = hcl.colors(hcl.pals('diverging')[2], n = 8)[c(1,5,8)])+ # dot color
+  # scale_fill_manual(values = c(replication, repair, splicing))+
+  guides(fill = FALSE, color = FALSE)+
+  theme_classic()+
+  theme(axis.title.y = element_blank(), 
+        legend.title=element_blank(),
+        legend.text = element_text(size = 6),
+        legend.key.size = unit(0.5, "lines"),
+        strip.text.x = element_blank(),
+        strip.background = element_rect(colour="white", fill="white"),
+        legend.position=c(.8,.4))
+
+
+
+# 4.heatmap
+p4 <- bind_rows(kd %>% mutate(trt = 'kd'),
+          mto1ko %>% mutate(trt = 'mto1ko'),
+          endo %>% mutate(trt = 'endo')) %>% 
+  mutate(sample = factor(sample, levels = c('IV198_5', 'IV198_6', 'IV198_9','IV200_6', 'IV200_9', 'IV200_13', 'IV198_8', 'IV198_12'))) %>% 
+  ggplot(aes(x = sample, y = proteinName, fill = log2(mratio))) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("blue", "white", "red")) + 
+  scale_x_discrete(position = "top")+
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        legend.position="none") + # Rotate x-axis labels
+  labs(title = "",
+         x = "",
+         y = "",
+         fill = "log2Ratios")
+
+p4n <- p4 + theme(legend.position="top")
+
+ggsave(file.path(base, 'figures/1.pdf'), device = 'pdf', plot = p1, width = 3, height = 4, units = 'in')
+ggsave(file.path(base, 'figures/2.pdf'), device = 'pdf', plot = p2, width = 3, height = 4, units = 'in')
+ggsave(file.path(base, 'figures/3.pdf'), device = 'pdf', plot = p3, width = 3, height = 4, units = 'in')
+ggsave(file.path(base, 'figures/4.pdf'), device = 'pdf', plot = p4, width = 4, height = 5, units = 'in')
+ggsave(file.path(base, 'figures/5.pdf'), device = 'pdf', plot = p4n, width = 4, height = 4, units = 'in')
 
 # visualizing the coverage of OXPHOS peptide using IRanges -----
 library(IRanges)
@@ -606,7 +406,7 @@ plotRanges_generic(ir)(ir)
 lines(mat, col = "red", lwd = 4)
 axis(2)
 
-# choose diverse for spectra
+# color picking for spectra
 cp <- c(hcl.colors(hcl.pals('diverging')[1], n = 4),
            hcl.colors(hcl.pals('diverging')[2], n = 4),
            hcl.colors(hcl.pals('diverging')[3], n = 4),
@@ -625,5 +425,4 @@ cp <- c(hcl.colors(hcl.pals('diverging')[1], n = 4),
            hcl.colors(hcl.pals('diverging')[15], n = 4),
            hcl.colors(hcl.pals('diverging')[16], n = 4)
            )[c(1,2,3,4,8,15,16,21,30,31,35,36,41,44,49,52, 64, 65)]
-show_col(cp)
-cp
+show_col(cp); cp
